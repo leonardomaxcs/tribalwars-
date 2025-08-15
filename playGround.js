@@ -1,3 +1,5 @@
+javascript:
+//Creators: Leonardo Max
 
 (function () {
     // ====== Config ======
