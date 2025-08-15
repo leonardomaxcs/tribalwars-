@@ -1,6 +1,6 @@
 javascript:
 //Creators: Leonardo Max
-/*Update list:
+
 
 (function() {
     // ====== UI Creation ======
