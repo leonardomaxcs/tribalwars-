@@ -1,8 +1,10 @@
-javascript:
-//Creators: Leonardo Max
 
+(function () {
+    // ====== Config ======
+    const troopCarryCapacity = { spear: 25, sword: 15, axe: 10 }; // per unit type
+    const troopAvailable = { spear: 300, sword: 100, axe: 150 };  // initial stock
+    const farmRange = 10; // max coords difference allowed for farm
 
-(function() {
     // ====== UI Creation ======
     function createUI() {
         const panel = document.createElement("div");
@@ -10,12 +12,13 @@ javascript:
         panel.style.position = "fixed";
         panel.style.top = "50px";
         panel.style.right = "20px";
-        panel.style.width = "300px";
-        panel.style.height = "400px";
+        panel.style.width = "320px";
+        panel.style.height = "500px";
         panel.style.background = "#f4f4f4";
         panel.style.border = "2px solid #333";
         panel.style.zIndex = 99999;
         panel.style.padding = "10px";
+        panel.style.overflowY = "auto";
         panel.style.fontFamily = "Arial, sans-serif";
         panel.innerHTML = `
             <h3>TW Helper</h3>
@@ -28,7 +31,7 @@ javascript:
         document.body.appendChild(panel);
     }
 
-    window.showTab = function(tab) {
+    window.showTab = function (tab) {
         const content = document.getElementById("tab-content");
         if (tab === "account") {
             content.innerHTML = `<pre>${JSON.stringify(getAccountInfo(), null, 2)}</pre>`;
@@ -44,24 +47,23 @@ javascript:
                 <label>Max Wall Level: <input id="maxWallLevel" type="number" value="2"></label><br>
                 <label>Farm Interval (min): <input id="farmInterval" type="number" value="30"></label><br>
                 <button onclick="startAutoFarm()">Start Auto Farm</button>
+                <h4>Planned Attacks:</h4>
+                <div id="farmQueue" style="font-size:12px;"></div>
             `;
+            updateFarmQueueUI();
         }
     };
 
     // ====== Simulation Data ======
     function getAccountInfo() {
-        return {
-            player: "Player123",
-            points: 15432,
-            rank: 234
-        };
+        return { player: "Player123", points: 15432, rank: 234 };
     }
 
     function getVillageList() {
         return [
-            { name: "001 Village", x: 500, y: 500, resources: { wood: 200, clay: 180, iron: 150 }, wall: 1 },
-            { name: "002 Village", x: 502, y: 499, resources: { wood: 350, clay: 300, iron: 250 }, wall: 3 },
-            { name: "003 Village", x: 505, y: 498, resources: { wood: 500, clay: 450, iron: 400 }, wall: 0 }
+            { id: 1, name: "001 Village", x: 500, y: 500, prod: { wood: 50, clay: 40, iron: 30 }, wall: 1 },
+            { id: 2, name: "002 Village", x: 502, y: 499, prod: { wood: 70, clay: 60, iron: 50 }, wall: 3 },
+            { id: 3, name: "003 Village", x: 505, y: 498, prod: { wood: 80, clay: 75, iron: 65 }, wall: 0 }
         ];
     }
 
@@ -76,32 +78,79 @@ javascript:
     function saveData(key, data) {
         localStorage.setItem(key, JSON.stringify(data));
     }
-
     function loadData(key) {
         const item = localStorage.getItem(key);
         return item ? JSON.parse(item) : null;
     }
 
-    // ====== Auto Farm Prototype ======
-    window.startAutoFarm = function() {
+    // ====== Troop Calculation ======
+    function calculateTroopsForLoot(totalLoot) {
+        let troops = { spear: 0, sword: 0, axe: 0 };
+        let lootRemaining = totalLoot;
+
+        const types = Object.keys(troopCarryCapacity);
+        for (let type of types) {
+            while (lootRemaining > 0 && troops[type] < troopAvailable[type]) {
+                troops[type]++;
+                lootRemaining -= troopCarryCapacity[type];
+            }
+        }
+        return troops;
+    }
+
+    // ====== Auto Farm Logic ======
+    window.startAutoFarm = function () {
         const maxWall = parseInt(document.getElementById("maxWallLevel").value);
         const interval = parseInt(document.getElementById("farmInterval").value) * 60 * 1000;
 
         console.log(`Auto farm started: max wall ${maxWall}, interval ${interval / 60000} min`);
-        
-        setInterval(() => {
-            const villages = getVillageList();
-            const farmTargets = villages.filter(v => v.wall <= maxWall);
-            
-            farmTargets.forEach(village => {
-                console.log(`Farming ${village.name} with resources:`, village.resources);
-                // Here would be troop calculation logic
+
+        let villages = getVillageList();
+        let farmTargets = villages.filter(v => v.wall <= maxWall);
+
+        let farmQueue = loadData("farmQueue") || [];
+
+        farmTargets.forEach(v => {
+            const lootEstimate = v.prod.wood + v.prod.clay + v.prod.iron;
+            const troopsNeeded = calculateTroopsForLoot(lootEstimate);
+            const nextFarmTime = new Date(Date.now() + interval).toISOString();
+
+            farmQueue.push({
+                target: v.name,
+                coords: `${v.x}|${v.y}`,
+                loot: lootEstimate,
+                troops: troopsNeeded,
+                time: nextFarmTime
             });
-            
-            saveData("lastFarm", new Date().toISOString());
-        }, interval);
+        });
+
+        saveData("farmQueue", farmQueue);
+        updateFarmQueueUI();
+
+        setInterval(() => {
+            console.log(`[Farm Tick] Sending simulated attacks...`);
+            farmQueue.forEach(task => {
+                if (new Date(task.time) <= new Date()) {
+                    console.log(`Farming ${task.target} with troops:`, task.troops);
+                    task.time = new Date(Date.now() + interval).toISOString(); // reset timer
+                }
+            });
+            saveData("farmQueue", farmQueue);
+            updateFarmQueueUI();
+        }, 5000); // check every 5s in simulation mode
     };
+
+    // ====== UI Farm Queue Update ======
+    function updateFarmQueueUI() {
+        const queueDiv = document.getElementById("farmQueue");
+        if (!queueDiv) return;
+        let farmQueue = loadData("farmQueue") || [];
+        queueDiv.innerHTML = farmQueue.map(t =>
+            `${t.target} (${t.coords}) - Loot: ${t.loot} - Next: ${new Date(t.time).toLocaleTimeString()}`
+        ).join("<br>");
+    }
 
     // ====== Init ======
     createUI();
 })();
+
